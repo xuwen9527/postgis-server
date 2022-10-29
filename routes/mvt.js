@@ -77,6 +77,10 @@ const schema = {
   }
 }
 
+const fs = require('fs');
+const path = require('path');
+const cache_path = "./cache";
+
 // create route
 module.exports = function(fastify, opts, next) {
   fastify.route({
@@ -84,29 +88,45 @@ module.exports = function(fastify, opts, next) {
     url: '/mvt/:table/:z/:x/:y',
     schema: schema,
     handler: function(request, reply) {
+      const {table, z, x, y} = request.params;
+      const dir = `${cache_path}/${table}/${z}/`;
+      const file_name = dir + `${x}/${y}.pbf`;
+      if (fs.existsSync(file_name)) {
+        const data = fs.createReadStream(file_name);
+        reply.header('Content-Type', 'application/x-protobuf').send(data);
+      } else {
       fastify.pg.connect(onConnect)
 
       function onConnect(err, client, release) {
         if (err) {
-          request.log.error(err)
-          return reply.code(500).send({ error: "Database connection error." })
+            return reply.send({
+              statusCode: 500,
+              error: 'Internal Server Error',
+              message: 'unable to connect to database server'
+            });
         }
 
-        client.query(sql(request.params, request.query), function onResult(
-          err,
-          result
-        ) {
+          client.query(sql(request.params, request.query), function onResult(err, result ) {
           release()
           if (err) {
             reply.send(err)
           } else {
             const mvt = result.rows[0].mvt
             if (mvt.length === 0) {
-              reply.code(204).send()
+                reply.code(204)
+              } else {
+                save_file = async () => {
+                  if (!fs.existsSync(dir)) {
+                    fs.mkdirSync(dir, {recursive : true});
+                  }
+                  fs.writeFileSync(file_name, mvt);
+                };
+                save_file();
             }
             reply.header('Content-Type', 'application/x-protobuf').send(mvt)
           }
-        })
+          });
+        }
       }
     }
   })
